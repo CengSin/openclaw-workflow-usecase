@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-func ChronicleArticleWorkflow(ctx workflow.Context, topic string) (string, error) {
+func ChronicleResearchWorkflow(ctx workflow.Context, topic string) (string, error) {
 	ao := workflow.ActivityOptions{
 		StartToCloseTimeout: 2 * time.Minute,
 		RetryPolicy: &temporal.RetryPolicy{
@@ -19,15 +19,30 @@ func ChronicleArticleWorkflow(ctx workflow.Context, topic string) (string, error
 	}
 	ctx = workflow.WithActivityOptions(ctx, ao)
 
-	var article string
+	var rewrittenQuery string
+	var result activity.ResearchRetrievalResult
 	logger := workflow.GetLogger(ctx)
-	logger.Info("Workflow: 调用 Chronicle 生成文章", "topic", topic)
+	logger.Info("Workflow: 先改写查询，再检索研报数据", "topic", topic)
 
-	if err := workflow.ExecuteActivity(ctx, activity.GenerateArticleWithChronicle, topic).Get(ctx, &article); err != nil {
-		logger.Error("Workflow: 生成文章失败", "error", err)
+	if err := workflow.ExecuteActivity(ctx, activity.RewriteResearchQueryWithChronicle, topic).Get(ctx, &rewrittenQuery); err != nil {
+		logger.Error("Workflow: 查询改写失败", "error", err)
 		return "", err
 	}
 
-	logger.Info("Workflow 完成", "length", len(article))
-	return article, nil
+	request := activity.ResearchRetrievalRequest{
+		Topic:          topic,
+		RewrittenQuery: rewrittenQuery,
+		RequiredSkills: []string{
+			activity.ChronicleSkillResearchAIPicker,
+			activity.ChronicleSkillQVeris,
+		},
+	}
+
+	if err := workflow.ExecuteActivity(ctx, activity.RetrieveResearchDataWithChronicle, request).Get(ctx, &result); err != nil {
+		logger.Error("Workflow: 研报数据检索失败", "error", err)
+		return "", err
+	}
+
+	logger.Info("Workflow 完成", "query", rewrittenQuery, "length", len(result.Document), "skills", result.SkillChain)
+	return result.Document, nil
 }

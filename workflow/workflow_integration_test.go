@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"ai.openclaw.usecase/workflow/activity"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -10,7 +11,7 @@ import (
 	"go.temporal.io/sdk/testsuite"
 )
 
-func TestChronicleArticleWorkflow_Integration(t *testing.T) {
+func TestChronicleResearchWorkflow_Integration(t *testing.T) {
 	if os.Getenv("OPENCLAW_INTEGRATION") != "1" {
 		t.Skip("设置 OPENCLAW_INTEGRATION=1 后执行本地 OpenClaw 集成测试")
 	}
@@ -22,11 +23,12 @@ func TestChronicleArticleWorkflow_Integration(t *testing.T) {
 
 	var ts testsuite.WorkflowTestSuite
 	env := ts.NewTestWorkflowEnvironment()
-	env.SetTestTimeout(30 * time.Second)
-	env.RegisterWorkflow(ChronicleArticleWorkflow)
-	env.RegisterActivity(activity.GenerateArticleWithChronicle)
+	env.SetTestTimeout(30 * time.Minute)
+	env.RegisterWorkflow(ChronicleResearchWorkflow)
+	env.RegisterActivity(activity.RewriteResearchQueryWithChronicle)
+	env.RegisterActivity(activity.RetrieveResearchDataWithChronicle)
 
-	env.ExecuteWorkflow(ChronicleArticleWorkflow, topic)
+	env.ExecuteWorkflow(ChronicleResearchWorkflow, topic)
 
 	if !env.IsWorkflowCompleted() {
 		t.Fatal("workflow 未完成")
@@ -44,4 +46,6 @@ func TestChronicleArticleWorkflow_Integration(t *testing.T) {
 	if strings.TrimSpace(article) == "" {
 		t.Fatal("workflow 返回空文章")
 	}
+
+	fmt.Println(article)
 }
