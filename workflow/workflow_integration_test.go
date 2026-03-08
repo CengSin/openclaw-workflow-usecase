@@ -11,24 +11,25 @@ import (
 	"go.temporal.io/sdk/testsuite"
 )
 
-func TestChronicleResearchWorkflow_Integration(t *testing.T) {
+func TestResearchReportWorkflow_Integration(t *testing.T) {
 	if os.Getenv("OPENCLAW_INTEGRATION") != "1" {
 		t.Skip("设置 OPENCLAW_INTEGRATION=1 后执行本地 OpenClaw 集成测试")
 	}
 
 	topic := os.Getenv("OPENCLAW_TEST_TOPIC")
 	if strings.TrimSpace(topic) == "" {
-		topic = "新能源行业周度观察"
+		topic = "写一篇关于新能源行业过去一周有关的研报的脱水研报"
 	}
 
 	var ts testsuite.WorkflowTestSuite
 	env := ts.NewTestWorkflowEnvironment()
 	env.SetTestTimeout(30 * time.Minute)
-	env.RegisterWorkflow(ChronicleResearchWorkflow)
-	env.RegisterActivity(activity.RewriteResearchQueryWithChronicle)
-	env.RegisterActivity(activity.RetrieveResearchDataWithChronicle)
+	env.RegisterWorkflow(ResearchReportWorkflow)
+	env.RegisterActivity(activity.FetchResearchReports)
+	env.RegisterActivity(activity.CleanResearchData)
+	env.RegisterActivity(activity.WriteCondensedResearchReport)
 
-	env.ExecuteWorkflow(ChronicleResearchWorkflow, topic)
+	env.ExecuteWorkflow(ResearchReportWorkflow, topic)
 
 	if !env.IsWorkflowCompleted() {
 		t.Fatal("workflow 未完成")
@@ -38,14 +39,14 @@ func TestChronicleResearchWorkflow_Integration(t *testing.T) {
 		t.Fatalf("workflow 失败: %v", err)
 	}
 
-	var article string
-	if err := env.GetWorkflowResult(&article); err != nil {
+	var report string
+	if err := env.GetWorkflowResult(&report); err != nil {
 		t.Fatalf("读取 workflow 结果失败: %v", err)
 	}
 
-	if strings.TrimSpace(article) == "" {
-		t.Fatal("workflow 返回空文章")
+	if strings.TrimSpace(report) == "" {
+		t.Fatal("workflow 返回空报告")
 	}
 
-	fmt.Println(article)
+	fmt.Println(report)
 }

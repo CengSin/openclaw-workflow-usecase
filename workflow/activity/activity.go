@@ -12,157 +12,188 @@ import (
 	"github.com/a3tai/openclaw-go/chatcompletions"
 )
 
-// RewriteResearchQueryWithChronicle 将用户主题改写成适合 research-ai-picker 执行的检索句。
-func RewriteResearchQueryWithChronicle(ctx context.Context, topic string) (string, error) {
-	baseURL := os.Getenv("OPENCLAW_BASE_URL")
-	if baseURL == "" {
-		baseURL = "http://localhost:18789"
-	}
-
-	reqCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
-	defer cancel()
-
+func FetchResearchReports(ctx context.Context, topic string) (string, error) {
 	if strings.TrimSpace(topic) == "" {
-		return "", errors.New("查询主题不能为空")
-	}
-
-	client := &chatcompletions.Client{
-		BaseURL: baseURL,
-		Token:   os.Getenv("OPENCLAW_TOKEN"),
-		AgentID: "chronicle",
+		return "", errors.New("用户需求不能为空")
 	}
 
 	prompt := fmt.Sprintf(
-		`请把下面的用户主题改写成一句适合后续 skill "%s" 执行的检索指令。
-用户主题：%s
-改写要求：
-- 输出一句自然中文指令即可，不要输出解释。
-- 指令中应明确检索对象、时间范围、行业/公司范围、目标信息类型。
-- 语气要像真实可执行的查询，例如：“调用 %s 查询过去一周新能源行业的相关研报”。
-- 如果原主题缺少时间范围，可默认补成“近期”或“过去一周”，但不要编造具体事实。
-- 不要添加 markdown、序号、引号或额外说明。`,
-		ChronicleSkillResearchAIPicker,
+		`请根据用户需求进行“研报检索”
+用户需求：
+%s
+
+你的任务：
+- 理解用户真正需要的研报范围、时间范围、行业范围和重点信息。
+- 自主使用你可用的 tools / skills / data sources 去检索最相关的研报、行业资料和原始数据。
+- 当前阶段只负责“抓取资料”，不要做最终成文。
+
+输出要求：
+- 输出一份“原始检索资料文档”。
+- 内容至少包含：
+  1. 检索目标理解
+  2. 命中的候选研报列表
+  3. 每份研报的核心观点摘录
+  4. 关键行业/财务/市场数据
+  5. 来源信息
+- 如果资料不足，请明确指出缺口，不要编造内容。`,
 		topic,
-		ChronicleSkillResearchAIPicker,
 	)
 
-	logChroniclePrompt("rewrite_query", prompt)
-
-	resp, err := client.Create(reqCtx, chatcompletions.Request{
-		Model: "openclaw:chronicle",
-		Messages: []chatcompletions.Message{
-			{Role: "user", Content: prompt},
-		},
-	})
-	if err != nil {
-		if httpErr, ok := errors.AsType[*chatcompletions.HTTPError](err); ok {
-			switch httpErr.StatusCode {
-			case 401:
-				return "", fmt.Errorf(
-					"调用 Chronicle 失败: OpenClaw 需要鉴权，请设置 OPENCLAW_TOKEN（baseURL=%s）: %w",
-					baseURL,
-					err,
-				)
-			case 404:
-				return "", fmt.Errorf(
-					"调用 Chronicle 失败: %s 没有暴露 /v1/chat/completions，当前地址更像 OpenClaw Control UI，请检查 OPENCLAW_BASE_URL 或本地 API 能力: %w",
-					baseURL,
-					err,
-				)
-			}
-		}
-		return "", fmt.Errorf("调用 Chronicle 失败: %w", err)
-	}
-
-	if len(resp.Choices) == 0 {
-		return "", errors.New("Chronicle 返回为空（choices=0）")
-	}
-
-	rewritten := strings.TrimSpace(resp.Choices[0].Message.Content)
-	if rewritten == "" {
-		return "", errors.New("Chronicle 返回重写查询为空")
-	}
-
-	return rewritten, nil
+	return callAgent(ctx, fetchAgentID(), "fetch_research_reports", prompt)
 }
 
-// RetrieveResearchDataWithChronicle 调用 Chronicle 完成第一阶段: 研报筛选与数据检索。
-func RetrieveResearchDataWithChronicle(ctx context.Context, req ResearchRetrievalRequest) (ResearchRetrievalResult, error) {
+func CleanResearchData(ctx context.Context, rawResearch string) (string, error) {
+	if strings.TrimSpace(rawResearch) == "" {
+		return "", errors.New("原始检索资料不能为空")
+	}
+
+	prompt := fmt.Sprintf(
+		`你是一名负责“数据整理与清洗”的 agent。
+
+下面是第一阶段得到的原始检索资料：
+%s
+
+你的任务：
+- 去重、归并相似研报和重复信息。
+- 提炼最重要的事实、观点、关键数字和潜在矛盾点。
+- 清洗掉噪声信息、低价值描述和重复表述。
+- 保留能够支撑最终脱水研报的核心证据。
+
+输出要求：
+- 输出一份“清洗后的结构化研报摘要”。
+- 内容至少包含：
+  1. 核心结论
+  2. 重点研报与来源
+  3. 关键数据点
+  4. 重要观点与分歧
+  5. 仍待确认的信息
+- 不要生成最终文章，不要写成完整研报。`,
+		rawResearch,
+	)
+
+	return callAgent(ctx, cleanAgentID(), "clean_research_data", prompt)
+}
+
+func WriteCondensedResearchReport(ctx context.Context, cleanedResearch string) (string, error) {
+	if strings.TrimSpace(cleanedResearch) == "" {
+		return "", errors.New("清洗后的研报摘要不能为空")
+	}
+
+	prompt := fmt.Sprintf(
+		`你是一名负责“撰写脱水研报”的 agent。
+
+下面是已经整理清洗完成的结构化研报摘要：
+%s
+
+你的任务：
+- 基于这些已经整理过的信息，写一篇中文“脱水研报”。
+- 保持专业、简洁、高信息密度。
+- 不要重复原始噪声，不要罗列无关细节。
+
+输出要求：
+- 输出结构建议：
+  1. 标题
+  2. 核心结论
+  3. 关键催化与数据
+  4. 风险与不确定性
+  5. 参考来源
+- 文章要可直接阅读，不要输出过程说明。`,
+		cleanedResearch,
+	)
+
+	return callAgent(ctx, writeAgentID(), "write_condensed_report", prompt)
+}
+
+func callAgent(ctx context.Context, agentID string, stage string, prompt string) (string, error) {
 	baseURL := os.Getenv("OPENCLAW_BASE_URL")
 	if baseURL == "" {
 		baseURL = "http://localhost:18789"
+	}
+
+	model := os.Getenv("OPENCLAW_MODEL")
+	if model == "" {
+		model = DefaultOpenClawModel
 	}
 
 	reqCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
 
-	if strings.TrimSpace(req.Topic) == "" {
-		return ResearchRetrievalResult{}, errors.New("检索主题不能为空")
-	}
-
-	requiredSkills := req.RequiredSkills
-	if len(requiredSkills) == 0 {
-		requiredSkills = []string{
-			ChronicleSkillResearchAIPicker,
-			ChronicleSkillQVeris,
-		}
-	}
-
-	query := strings.TrimSpace(req.RewrittenQuery)
-	if query == "" {
-		query = req.Topic
-	}
-
 	client := &chatcompletions.Client{
 		BaseURL: baseURL,
 		Token:   os.Getenv("OPENCLAW_TOKEN"),
-		AgentID: "chronicle",
+		AgentID: agentID,
 	}
 
-	logChroniclePrompt("retrieve_research", query)
+	logOpenClawPrompt(stage, agentID, model, prompt)
 
 	resp, err := client.Create(reqCtx, chatcompletions.Request{
-		Model: "openclaw:chronicle",
+		// Agent route is selected by x-openclaw-agent-id. Model keeps the HTTP API request compatible.
+		Model: model,
 		Messages: []chatcompletions.Message{
-			{Role: "user", Content: query},
+			{Role: "user", Content: prompt},
 		},
 	})
 	if err != nil {
-		if httpErr, ok := errors.AsType[*chatcompletions.HTTPError](err); ok {
+		var httpErr *chatcompletions.HTTPError
+		if errors.As(err, &httpErr) {
 			switch httpErr.StatusCode {
 			case 401:
-				return ResearchRetrievalResult{}, fmt.Errorf(
-					"调用 Chronicle 失败: OpenClaw 需要鉴权，请设置 OPENCLAW_TOKEN（baseURL=%s）: %w",
+				return "", fmt.Errorf(
+					"调用 agent=%s 失败: OpenClaw 需要鉴权，请设置 OPENCLAW_TOKEN（baseURL=%s）: %w",
+					agentID,
 					baseURL,
 					err,
 				)
 			case 404:
-				return ResearchRetrievalResult{}, fmt.Errorf(
-					"调用 Chronicle 失败: %s 没有暴露 /v1/chat/completions，当前地址更像 OpenClaw Control UI，请检查 OPENCLAW_BASE_URL 或本地 API 能力: %w",
+				return "", fmt.Errorf(
+					"调用 agent=%s 失败: %s 没有暴露 /v1/chat/completions，当前地址更像 OpenClaw Control UI，请检查 OPENCLAW_BASE_URL 或本地 API 能力: %w",
+					agentID,
 					baseURL,
 					err,
 				)
 			}
 		}
-		return ResearchRetrievalResult{}, fmt.Errorf("调用 Chronicle 失败: %w", err)
+		return "", fmt.Errorf("调用 agent=%s 失败: %w", agentID, err)
 	}
 
 	if len(resp.Choices) == 0 {
-		return ResearchRetrievalResult{}, errors.New("Chronicle 返回为空（choices=0）")
+		return "", fmt.Errorf("调用 agent=%s 失败: 返回为空（choices=0）", agentID)
 	}
 
-	document := strings.TrimSpace(resp.Choices[0].Message.Content)
-	if document == "" {
-		return ResearchRetrievalResult{}, errors.New("Chronicle 返回内容为空")
+	content := strings.TrimSpace(resp.Choices[0].Message.Content)
+	if content == "" {
+		return "", fmt.Errorf("调用 agent=%s 失败: 返回内容为空", agentID)
 	}
 
-	return ResearchRetrievalResult{
-		Document:   document,
-		Query:      query,
-		SkillChain: requiredSkills,
-	}, nil
+	return content, nil
 }
 
-func logChroniclePrompt(stage string, prompt string) {
-	log.Printf("=== Chronicle prompt [%s] begin ===\n%s\n=== Chronicle prompt [%s] end ===", stage, prompt, stage)
+func logOpenClawPrompt(stage string, agentID string, model string, prompt string) {
+	log.Printf(
+		"=== OpenClaw prompt [%s] begin ===\nagent=%s\nmodel=%s\n%s\n=== OpenClaw prompt [%s] end ===",
+		stage,
+		agentID,
+		model,
+		prompt,
+		stage,
+	)
+}
+
+func fetchAgentID() string {
+	return envOrDefault("OPENCLAW_FETCH_AGENT_ID", DefaultOpenClawAgentID)
+}
+
+func cleanAgentID() string {
+	return envOrDefault("OPENCLAW_CLEAN_AGENT_ID", DefaultOpenClawAgentID)
+}
+
+func writeAgentID() string {
+	return envOrDefault("OPENCLAW_WRITE_AGENT_ID", DefaultOpenClawAgentID)
+}
+
+func envOrDefault(key string, fallback string) string {
+	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+		return value
+	}
+	return fallback
 }
