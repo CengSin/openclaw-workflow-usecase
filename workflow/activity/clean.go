@@ -13,8 +13,7 @@ func CleanResearchData(ctx context.Context, rawResearch string) (string, error) 
 	}
 
 	prompt := fmt.Sprintf(
-		`你是一名负责"数据整理与清洗"的 agent。
-
+		`
 下面是第一阶段得到的原始检索资料：
 %s
 

@@ -14,8 +14,7 @@ func VerifySources(ctx context.Context, cleanedResearch string) (string, error) 
 	}
 
 	prompt := fmt.Sprintf(
-		`你是一名负责"溯源校验"的 agent，专门识别并过滤研报中的幻觉来源。
-
+		`
 下面是已整理的结构化研报摘要：
 %s
 

@@ -13,8 +13,7 @@ func WriteCondensedResearchReport(ctx context.Context, input ResearchReportInput
 	}
 
 	prompt := fmt.Sprintf(
-		`你是一名负责"撰写研报"的 agent。
-
+		`
 下面是已经整理、清洗并经过溯源校验的结构化研报摘要：
 %s
 
