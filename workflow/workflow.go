@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-func ResearchReportWorkflow(ctx workflow.Context, topic string) (string, error) {
+func ResearchReportWorkflow(ctx workflow.Context, input activity.ResearchReportInput) (string, error) {
 	ao := workflow.ActivityOptions{
 		StartToCloseTimeout: 30 * time.Minute,
 		RetryPolicy: &temporal.RetryPolicy{
@@ -21,11 +21,18 @@ func ResearchReportWorkflow(ctx workflow.Context, topic string) (string, error) 
 
 	var rawResearch string
 	var cleanedResearch string
+	var verifiedResearch string
 	var finalReport string
 	logger := workflow.GetLogger(ctx)
-	logger.Info("Workflow: 开始执行脱水研报编排", "topic", topic)
+	logger.Info("Workflow: 开始执行研报编排",
+		"topic", input.Topic,
+		"timeRange", input.TimeRange,
+		"industry", input.Industry,
+		"style", input.Style,
+		"maxSources", input.MaxSources,
+	)
 
-	if err := workflow.ExecuteActivity(ctx, activity.FetchResearchReports, topic).Get(ctx, &rawResearch); err != nil {
+	if err := workflow.ExecuteActivity(ctx, activity.FetchResearchReports, input).Get(ctx, &rawResearch); err != nil {
 		logger.Error("Workflow: 研报检索失败", "error", err)
 		return "", err
 	}
@@ -35,8 +42,13 @@ func ResearchReportWorkflow(ctx workflow.Context, topic string) (string, error) 
 		return "", err
 	}
 
-	if err := workflow.ExecuteActivity(ctx, activity.WriteCondensedResearchReport, cleanedResearch).Get(ctx, &finalReport); err != nil {
-		logger.Error("Workflow: 脱水研报撰写失败", "error", err)
+	if err := workflow.ExecuteActivity(ctx, activity.VerifySources, cleanedResearch).Get(ctx, &verifiedResearch); err != nil {
+		logger.Error("Workflow: 溯源校验失败", "error", err)
+		return "", err
+	}
+
+	if err := workflow.ExecuteActivity(ctx, activity.WriteCondensedResearchReport, input, verifiedResearch).Get(ctx, &finalReport); err != nil {
+		logger.Error("Workflow: 研报撰写失败", "error", err)
 		return "", err
 	}
 
@@ -44,6 +56,7 @@ func ResearchReportWorkflow(ctx workflow.Context, topic string) (string, error) 
 		"Workflow 完成",
 		"rawLength", len(rawResearch),
 		"cleanedLength", len(cleanedResearch),
+		"verifiedLength", len(verifiedResearch),
 		"reportLength", len(finalReport),
 	)
 	return finalReport, nil

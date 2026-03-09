@@ -16,9 +16,24 @@ func TestResearchReportWorkflow_Integration(t *testing.T) {
 		t.Skip("设置 OPENCLAW_INTEGRATION=1 后执行本地 OpenClaw 集成测试")
 	}
 
-	topic := os.Getenv("OPENCLAW_TEST_TOPIC")
-	if strings.TrimSpace(topic) == "" {
-		topic = "写一篇关于新能源行业过去一周有关的研报的脱水研报"
+	input := activity.ResearchReportInput{
+		Topic:     "新能源行业过去一周研报",
+		TimeRange: "过去一周",
+		Industry:  "新能源",
+		Style:     "脱水研报",
+	}
+
+	if topic := os.Getenv("OPENCLAW_TEST_TOPIC"); strings.TrimSpace(topic) != "" {
+		input.Topic = topic
+	}
+	if tr := os.Getenv("OPENCLAW_TEST_TIME_RANGE"); strings.TrimSpace(tr) != "" {
+		input.TimeRange = tr
+	}
+	if ind := os.Getenv("OPENCLAW_TEST_INDUSTRY"); strings.TrimSpace(ind) != "" {
+		input.Industry = ind
+	}
+	if style := os.Getenv("OPENCLAW_TEST_STYLE"); strings.TrimSpace(style) != "" {
+		input.Style = style
 	}
 
 	var ts testsuite.WorkflowTestSuite
@@ -27,9 +42,10 @@ func TestResearchReportWorkflow_Integration(t *testing.T) {
 	env.RegisterWorkflow(ResearchReportWorkflow)
 	env.RegisterActivity(activity.FetchResearchReports)
 	env.RegisterActivity(activity.CleanResearchData)
+	env.RegisterActivity(activity.VerifySources)
 	env.RegisterActivity(activity.WriteCondensedResearchReport)
 
-	env.ExecuteWorkflow(ResearchReportWorkflow, topic)
+	env.ExecuteWorkflow(ResearchReportWorkflow, input)
 
 	if !env.IsWorkflowCompleted() {
 		t.Fatal("workflow 未完成")

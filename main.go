@@ -10,13 +10,34 @@ import (
 	"go.temporal.io/sdk/worker"
 	"log"
 	"os"
+	"strconv"
 	"time"
 )
 
 func main() {
-	topic := "写一篇关于新能源行业过去一周有关的研报的脱水研报"
+	input := activity.ResearchReportInput{
+		Topic:     "新能源行业过去一周研报",
+		TimeRange: "过去一周",
+		Industry:  "新能源",
+		Style:     "脱水研报",
+	}
+
 	if len(os.Args) > 1 && os.Args[1] != "" {
-		topic = os.Args[1]
+		input.Topic = os.Args[1]
+	}
+	if len(os.Args) > 2 && os.Args[2] != "" {
+		input.TimeRange = os.Args[2]
+	}
+	if len(os.Args) > 3 && os.Args[3] != "" {
+		input.Industry = os.Args[3]
+	}
+	if len(os.Args) > 4 && os.Args[4] != "" {
+		input.Style = os.Args[4]
+	}
+	if len(os.Args) > 5 && os.Args[5] != "" {
+		if n, err := strconv.Atoi(os.Args[5]); err == nil {
+			input.MaxSources = n
+		}
 	}
 
 	c, err := client.Dial(client.Options{})
@@ -30,6 +51,7 @@ func main() {
 	we.RegisterWorkflow(workflow.ResearchReportWorkflow)
 	we.RegisterActivity(activity.FetchResearchReports)
 	we.RegisterActivity(activity.CleanResearchData)
+	we.RegisterActivity(activity.VerifySources)
 	we.RegisterActivity(activity.WriteCondensedResearchReport)
 	if err := we.Start(); err != nil {
 		log.Fatalln("无法启动内嵌 Worker", err)
@@ -45,7 +67,7 @@ func main() {
 		context.Background(),
 		options,
 		workflow.ResearchReportWorkflow,
-		topic,
+		input,
 	)
 	if err != nil {
 		log.Fatalln("无法启动 Workflow", err)
@@ -59,6 +81,6 @@ func main() {
 		log.Fatalln("Workflow 执行失败", err)
 	}
 
-	fmt.Println("==== 脱水研报输出 ====")
+	fmt.Println("==== 研报输出 ====")
 	fmt.Println(report)
 }
